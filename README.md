@@ -113,6 +113,7 @@ We can use the 2015 Tiger data we downloaded previously.
 Create the geocoder database. (Note that this must be executed from within the
 `build` directory since it has a hard reference to
 `../src/shp2sqlite/shp2sqlite`.)
+
     cd ../build
     ./tiger_import ../database/geocoder.db ../data
     sudo ./build_indexes ../database/geocoder.db
