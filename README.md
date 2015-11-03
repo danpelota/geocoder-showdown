@@ -25,6 +25,8 @@ Install PostgreSQL 9.4:
 
     sudo apt-get install -y postgresql-9.4
 
+
+
 Install our PostGIS dependencies, as well as a few other spatial packages we'll need later:
 
     sudo apt-get install libxml2-dev libgeos-dev libproj-dev libpcre3-dev libxml2-dev libpq-dev postgresql-server-dev-9.4 g++ libgdal-dev python-gdal
@@ -77,13 +79,18 @@ Just for good measure:
     psql -c "vacuum analyze verbose tiger.faces;"
     psql -c "vacuum analyze verbose tiger.featnames;"
     psql -c "vacuum analyze verbose tiger.place;"
-    psql -c "vacuum analyze verbose tiger.cousub;
+    psql -c "vacuum analyze verbose tiger.cousub;"
     psql -c "vacuum analyze verbose tiger.county;"
     psql -c "vacuum analyze verbose tiger.state;"
 
 Check that the geocoder and all necessary data was installed correctly:
 
-    psql -c "SELECT st_x(geomout), st_y(geomout) FROM geocode('400 S Monroe St, Tallahassee, FL 32399');"
+    psql -c "SELECT st_x(geomout), st_y(geomout) FROM geocode('400 S Monroe St, Tallahassee, FL 32399', 1);"
+
+           st_x        |       st_y
+    -------------------+------------------
+     -84.2807360244119 | 30.4381207774995
+    (1 row)
 
 ## Installing the geocommons geocoder
 
@@ -116,10 +123,10 @@ Create the geocoder database. (Note that this must be executed from within the
 
     cd ../build
     ./tiger_import ../database/geocoder.db ../data
-    sudo ./build_indexes ../database/geocoder.db
+    sh ./build_indexes ../database/geocoder.db
     cd ..
     bin/rebuild_metaphones database/geocoder.db
-    sudo build/rebuild_cluster database/geocoder.db
+    sudo sh build/rebuild_cluster database/geocoder.db
 
 To test the geocommons geocoder, fire up an irb session and geocode a test address:
 
