@@ -63,7 +63,24 @@ geocoder.
 
     # Required for the geocoder scripts
     sudo apt-get install unzip
-    psql -t -c "SELECT Loader_Generate_Script(ARRAY['RI'], 'sh');" -o import-fl.sh --no-align
+    psql -t -c "SELECT Loader_Generate_Script(ARRAY['FL'], 'sh');" -o import-fl.sh --no-align
     # Go for a long walk
     sh import-fl.sh
     psql -t -c "SELECT loader_generate_nation_script('sh');" -o import-nation.sh --no-align
+    sh import-nation.sh
+
+Just for good measure:
+
+    psql -c "SELECT install_missing_indexes();"
+    psql -c "vacuum analyze verbose tiger.addr;"
+    psql -c "vacuum analyze verbose tiger.edges;"
+    psql -c "vacuum analyze verbose tiger.faces;"
+    psql -c "vacuum analyze verbose tiger.featnames;"
+    psql -c "vacuum analyze verbose tiger.place;"
+    psql -c "vacuum analyze verbose tiger.cousub;
+    psql -c "vacuum analyze verbose tiger.county;"
+    psql -c "vacuum analyze verbose tiger.state;"
+
+Check that the geocoder and all necessary data was installed correctly:
+
+    psql -c "SELECT st_x(geomout), st_y(geomout) FROM geocode('400 S Monroe St, Tallahassee, FL 32399');"
