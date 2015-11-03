@@ -84,3 +84,52 @@ Just for good measure:
 Check that the geocoder and all necessary data was installed correctly:
 
     psql -c "SELECT st_x(geomout), st_y(geomout) FROM geocode('400 S Monroe St, Tallahassee, FL 32399');"
+
+## Installing the geocommons geocoder
+
+Install some dependencies:
+
+    sudo apt-get install ruby-dev sqlite3 libsqlite3-dev flex
+    sudo gem install text sqlite3 fastercsv
+
+Grab the latest version of the geocommons geocoder and install it:
+
+    sudo apt-get install git
+    git clone git://github.com/geocommons/geocoder.git
+    cd geocoder
+    make
+    make install
+    sudo gem install Geocoder-US-2.0.4.gem
+
+We can use the 2015 Tiger data we downloaded previously. 
+
+    mkdir data
+    mkdir database
+    cd data
+    cp /gisdata/ftp2.census.gov/geo/tiger/TIGER2015/ADDR/*.zip ./
+    cp /gisdata/ftp2.census.gov/geo/tiger/TIGER2015/FEATNAMES/*.zip ./
+    cp /gisdata/ftp2.census.gov/geo/tiger/TIGER2015/EDGES/*.zip ./
+
+Create the geocoder database. (Note that this must be executed from within the
+`build` directory since it has a hard reference to
+`../src/shp2sqlite/shp2sqlite`.)
+    cd ../build
+    ./tiger_import ../database/geocoder.db ../data
+    sudo ./build_indexes ../database/geocoder.db
+    cd ..
+    bin/rebuild_metaphones database/geocoder.db
+    sudo build/rebuild_cluster database/geocoder.db
+
+To test the geocommons geocoder, fire up an irb session and geocode a test address:
+
+    irb(main):001:0> require 'geocoder/us'
+    => true
+
+    irb(main):002:0> db = Geocoder::US::Database.new('database/geocoder.db')
+    => #<Geocoder::US::Database:0x00000001cc1248 @db=#<SQLite3::Database:0x00000001cc1158>, @st={}, @dbtype=1, @debug=false, @threadsafe=false>
+
+    irb(main):003:0> p db.geocode("400 S Monroe St, Tallahassee, FL 32399")
+    [{:zip=>"32399", :city=>"Tallahassee", :state=>"FL", :lat=>30.436901,
+      :lon=>-84.282546, :fips_county=>"12073", :score=>0.614, :precision=>:zip}]
+    => [{:zip=>"32399", :city=>"Tallahassee", :state=>"FL", :lat=>30.436901,
+         :lon=>-84.282546, :fips_county=>"12073", :score=>0.614, :precision=>:zip}]
