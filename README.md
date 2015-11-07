@@ -8,7 +8,7 @@ An analysis of several popular geocoders, including:
 
 ## Installing PostgreSQL 9.4, PostGIS 2.2, and the TIGER geocoder
 
-First, I'll be setting the following PostgreSQL environment variables:
+First, we'll set the following PostgreSQL environment variables:
 
     export PGDATABASE=geocoder
     export PGUSER=postgres
@@ -22,13 +22,18 @@ Next, add the PostgreSQL apt repo and key:
 Install PostgreSQL 9.4:
 
     sudo apt-get install -y postgresql-9.4
+    export PATH='/usr/lib/postgresql/9.4/bin/':$PATH
 
-Install our PostGIS dependencies, as well as a few other spatial packages we'll need later:
+Install the PostGIS dependencies, as well as a few other spatial packages we'll
+need later:
 
-    sudo apt-get install -y libxml2-dev libgeos-dev libproj-dev libpcre3-dev libxml2-dev libpq-dev postgresql-server-dev-9.4 g++ libgdal-dev python-gdal
+    apt-get install -y libxml2-dev libgeos-dev libproj-dev libpcre3-dev  
+    apt-get install -y libxml2-dev libpq-dev postgresql-server-dev-9.4 g++ 
+    apt-get install -y libgdal-dev python-gdal python-requests unzip
 
 We'll build PostGIS 2.2 against libgeos 3.5.
 
+    cd ~
     wget http://download.osgeo.org/geos/geos-3.5.0.tar.bz2
     tar xjf geos-3.5.0.tar.bz2
     cd geos-3.5.0/
@@ -40,6 +45,7 @@ We'll build PostGIS 2.2 against libgeos 3.5.
 We'll use PostGIS 2.2, which includes support for the 2015 vintage of the TIGER
 GIS data:
 
+    cd ~
     wget http://postgis.net/stuff/postgis-2.2.0dev.tar.gz
     tar xvf postgis-2.2.0dev.tar.gz
     cd postgis-2.2.0dev
@@ -60,8 +66,6 @@ Now we'll generate and run the scripts that download and process the FL TIGER
 data, as well as the national state and county lookup tables needed by the
 geocoder.
 
-    # Required for the geocoder scripts
-    sudo apt-get install -y unzip
     psql -t -c "SELECT Loader_Generate_Script(ARRAY['FL'], 'sh');" -o import-fl.sh --no-align
     sh import-fl.sh
     # Go for a long walk
@@ -93,17 +97,18 @@ Check that the geocoder and all necessary data was installed correctly:
 
 Install some dependencies:
 
-    sudo apt-get install -y ruby-dev sqlite3 libsqlite3-dev flex
-    sudo gem install text sqlite3 fastercsv
+    apt-get install -y ruby-dev sqlite3 libsqlite3-dev flex
+    gem install text sqlite3 fastercsv
 
 Grab the latest version of the geocommons geocoder and install it:
 
-    sudo apt-get install git
+    cd ~
+    apt-get install git
     git clone git://github.com/geocommons/geocoder.git
     cd geocoder
     make
     make install
-    sudo gem install Geocoder-US-2.0.4.gem
+    gem install Geocoder-US-2.0.4.gem
 
 We can use the 2015 Tiger data we downloaded previously. 
 
@@ -114,9 +119,9 @@ We can use the 2015 Tiger data we downloaded previously.
     cp /gisdata/ftp2.census.gov/geo/tiger/TIGER2015/FEATNAMES/*.zip ./
     cp /gisdata/ftp2.census.gov/geo/tiger/TIGER2015/EDGES/*.zip ./
 
-Create the geocoder database. (Note that this must be executed from within the
-`build` directory since it has a hard reference to
-`../src/shp2sqlite/shp2sqlite`.)
+Create the geocoder database. Note that this must be executed from within the
+`build` directory since it has a relative path reference to
+`../src/shp2sqlite/shp2sqlite`.
 
     cd ../build
     ./tiger_import ../database/geocoder.db ../data
@@ -138,6 +143,92 @@ To test the geocommons geocoder, fire up an irb session and geocode a test addre
       :lon=>-84.282546, :fips_county=>"12073", :score=>0.614, :precision=>:zip}]
     => [{:zip=>"32399", :city=>"Tallahassee", :state=>"FL", :lat=>30.436901,
          :lon=>-84.282546, :fips_county=>"12073", :score=>0.614, :precision=>:zip}]
+
+## Installing Nominatim
+
+Install the nominatim dependencies (some of these were installed in previous
+steps, but are included here for completeness):
+
+    apt-get install -y build-essential libxml2-dev libgeos-dev libpq-dev libbz2-dev 
+    apt-get install -y libtool automake libproj-dev libboost-dev 
+    apt-get install -y libboost-system-dev libboost-filesystem-dev libboost-thread-dev 
+    apt-get install -y libexpat-dev gcc proj-bin libgeos-c1 osmosis libgeos++-dev
+    apt-get install -y php5 php-pear php5-pgsql php5-json php-db
+    apt-get install -y libprotobuf-c0-dev protobuf-c-compiler
+
+Download and install Nominatim
+
+    cd ~
+    wget http://www.nominatim.org/release/Nominatim-2.4.0.tar.bz2
+    tar xvf Nominatim-2.4.0.tar.bz2
+    cd Nominatim
+    ./configure
+    make
+
+Update the nominatim php settings to reflect our version of PostgreSQL,
+PostGIS, and our website URL:
+
+
+    // Software versions
+    @define('CONST_Postgresql_Version', '9.4'); // values: 9.0, ... , 9.4
+    @define('CONST_Postgis_Version', '2.2'); // values: 1.5, 2.0, 2.1
+
+    // Website settings
+    @define('CONST_Website_BaseURL', '/nominatim/');
+
+Create our web user:
+
+    createuser -SDR www-data
+
+The module path needs to be executable: 
+
+    chmod +x ./
+    chmod +x module
+
+Download and load the Florida OSM data:
+
+    wget -P /gisdata/ http://download.geofabrik.de/north-america/us/florida-latest.osm.pbf
+     ./utils/setup.php --osm-file /gisdata/florida-latest.osm.pbf --all  2>&1 | tee setup.log
+
+We'll use nginx as our webserver:
+
+    sudo apt-get install nginx php5-fpm
+
+Setup the local nominatim web service
+
+    sudo mkdir -m 755 /usr/share/nginx/html/nominatim
+    sudo chown vagrant /usr/share/nginx/html/nominatim
+    ./utils/setup.php --create-website /usr/share/nginx/html/nominatim
+
+Edit `/etc/nginx/sites-available/default` to include:
+
+    location ~ [^/]\.php(/|$) {
+           fastcgi_split_path_info ^(.+?\.php)(/.*)$;
+           if (!-f $document_root$fastcgi_script_name) {
+                   return 404;
+           }
+           fastcgi_pass unix:/var/run/php5-fpm.sock;
+           fastcgi_index index.php;
+           include fastcgi_params;
+    }
+
+At this point, you should be able to point your browser to
+`http://localhost/nominatim/index.php` and browse your locally hosted copy
+of the OSM website, including the nominatim geocoder. Let's run a test address:
+
+    curl "http://localhost/nominatim/search.php?q=400%20S%20Monroe%20St%2C%20Tallahassee%2C%20FL%2032399&format=json"
+
+    [{"place_id":"666756","licence":"Data © OpenStreetMap contributors, ODbL 1.0. http:\/\/www.openstreetmap.org\/copyright","osm_type":"way","osm_id":"84737196","boundingbox":["30.4345605","30.4354982","-84.2807049","-84.2806661"],"lat":"30.4349352","lon":"-84.2807049","display_name":"South Monroe Street, Tallahassee, Leon County, Florida, 32399-6508, United States of America","class":"highway","type":"primary","importance":0.61},{"place_id":"641941","licence":"Data © OpenStreetMap contributors, ODbL 1.0. http:\/\/www.openstreetmap.org\/copyright","osm_type":"way","osm_id":"47976800","boundingbox":["30.4362501","30.4380588","-84.2806933","-84.2806236"],"lat":"30.4374929","lon":"-84.2806933","display_name":"South Monroe Street, Tallahassee, Leon County, Florida, 32301-2034, United States of America","class":"highway","type":"primary","importance":0.61}]
+
+Nominatim can use TIGER address data to supplement the OSM house number data.
+Luckily, we already have the TIGER EDGE data downloaded. First, we'll need to
+convert the data to SQL:
+
+    ./utils/imports.php --parse-tiger-2011 /gisdata/ftp2.census.gov/geo/tiger/TIGER2015/EDGES/
+
+Then we'll load it:
+
+    ./utils/setup.php --import-tiger-data
 
 ## Installing the benchmark data: Florida statewide parcel data
 
@@ -161,33 +252,33 @@ the shapefiles:
     wget -N ftp://sdrftp03.dor.state.fl.us/Map%20Data/00_2015/*.zip
     unzip -u -j "*.zip"
 
-These shapefiles come in several different projections, so we'll determine the
-projection for each file via the `get_srid.py` script, which simply feeds the
-contents of the .prj file to prj2epsg.org and returns the srid to `STDOUT`.
-Once we determine the SRID, we'll use `shp2pgsql` to stick the GIS data into a
-Postgres table. Finally, we'll reproject the geometry column into SRID 4326 and
-cram all the counties into a single table:
+These shapefiles come in various projections, so we'll determine the
+projection dynamically for each file via the `get_srid.py` script, which simply
+feeds the contents of the .prj file to prj2epsg.org and returns the srid to
+`STDOUT`.  Once we determine the SRID, we'll use `shp2pgsql` to stick the GIS
+data into a Postgres table. Finally, we'll reproject the geometry column into
+SRID 4326 and cram all the counties into a single table:
 
-    psql << EOF 
+    psql << EOF
     DROP TABLE IF EXISTS props_gis;
     CREATE TABLE props_gis (
         gid SERIAL PRIMARY KEY,
         parcelno TEXT,
         geom GEOMETRY('MULTIPOLYGON', 4326)
     );
+    CREATE SCHEMA IF NOT EXISTS staging;
     EOF
 
     for FILE in *.shp
     do
         echo "Getting SRID for $FILE"
-        #TODO: Replace this with a simple curl call?
         SRID=$(python get_srid.py $FILE)
         echo "SRID for $FILE is $SRID"
         psql -c "DROP TABLE IF EXISTS staging.props_gis;"
         shp2pgsql -s $SRID -c "$FILE" staging.props_gis | psql --quiet
         psql -c "INSERT INTO props_gis (parcelno, geom) SELECT parcelno, ST_Transform(ST_Force2D(geom), 4326) FROM staging.props_gis;"
     done
-    
+        
     psql -c "CREATE INDEX idx_props_gis_parcelno ON props_gis(parcelno);"
 
 Next, we need to download and import the NAL data.
@@ -198,7 +289,6 @@ Next, we need to download and import the NAL data.
 
     # Table to hold the property data
     psql << EOF
-    CREATE SCHEMA IF NOT EXISTS staging;
     DROP TABLE IF EXISTS staging.props_nal;
     CREATE TABLE staging.props_nal(
         co_no TEXT,
@@ -360,8 +450,6 @@ Next, we need to download and import the NAL data.
         spc_cir_yr TEXT,
         spc_cir_txt TEXT
     );
-
-
     EOF
 
     for file in *.csv
@@ -392,6 +480,7 @@ Next, we need to download and import the NAL data.
         staging.props_nal;
 
     CREATE INDEX idx_props_nal_parcel_id ON props_nal(parcel_id);
+    VACUUM ANALYZE staging.props_nal;
 
     -- Some properties are missing a phy_city and/or phy_zipcd. We can infer them
     -- from the owner's information, where the owner has the same address
@@ -428,4 +517,5 @@ reference:
     LIMIT 10000;
 
     CREATE INDEX idx_props_sampled_geom ON props_sampled USING gist(geom);
+    VACUUM ANALYZE props_sampled;
     EOF
