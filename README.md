@@ -1,10 +1,27 @@
 # Geocoder Showdown
-An analysis of several popular geocoders, including:
 
-* PostGIS Tiger Geocoder
-* Nominatim
-* SmartyStreets
-* Geocommons Geocoder
+Back in 2011, [I asked a question](http://gis.stackexchange.com/questions/7271/geocode-quality-nominatim-vs-postgis-geocoder-vs-geocoderus-2-0) 
+on gis.stackexchange.com regarding the accuracy of range-based geocoders that
+can be installed and run locally. Since then, I've leveraged several solutions
+for bulk geocoding, including the [PostGIS geocoder](http://postgis.net/docs/Geocode.html),
+the ruby-based [Geocommons Geocoder](https://github.com/geocommons/geocoder/), 
+and [SmartyStreets](https://smartystreets.com/) (which doesn't run locally, but
+has no trouble geocoding millions of addresses per hour). However, I've haven't
+come across a thorough analysis of the accuracy of these geocoders in the
+meantime, and the stackexchange question still receives attention, so I figured
+I'd evaluate them here. 
+
+First, I'll run through the installation of the PostGIS Tiger geocoder, the
+Nominatim geocoder (i.e. OpenStreetMaps's geocoder/reverse geocoder), and the
+Geocommons Geocoder. While there are web services that expose each through an
+API, I wanted to review the setup and installation here as well.
+
+Then, I'll evaluate each against a test dataset: the Florida Statewide Property
+Database. I'll also evaluate SmartyStreets, which offers CASS-certified address
+standardization/validation through a web API.
+
+I'll install and evaluate the geocoders on an `m4.xlarge` AWS EC2 instance with
+16GB of memory and a 50GB SSD, running the Ubuntu 14.04 AMI (ami-5189a661).
 
 ## Installing PostgreSQL 9.4, PostGIS 2.2, and the TIGER geocoder
 
@@ -28,8 +45,8 @@ Install the PostGIS dependencies, as well as a few other spatial packages we'll
 need later:
 
     apt-get install -y libxml2-dev libgeos-dev libproj-dev libpcre3-dev  
-    apt-get install -y libxml2-dev libpq-dev postgresql-server-dev-9.4 g++ 
-    apt-get install -y libgdal-dev python-gdal python-requests unzip
+    apt-get install -y liblwgeom-dev libpq-dev postgresql-server-dev-9.4 g++ gcc
+    apt-get install -y libgdal-dev python-gdal python-requests unzip make
 
 We'll build PostGIS 2.2 against libgeos 3.5.
 
@@ -54,7 +71,8 @@ GIS data:
     sudo make install
     cd ..
 
-Create our PostGIS-enabled database and install the geocoder:
+Create our PostGIS-enabled database and install the geocoder (first, edit the
+pg_hba.conf file `trust` local socket connections).
 
     createdb
     psql -c "CREATE EXTENSION postgis;"
@@ -66,6 +84,9 @@ Now we'll generate and run the scripts that download and process the FL TIGER
 data, as well as the national state and county lookup tables needed by the
 geocoder.
 
+    cd ~
+    sudo mkdir /gisdata
+    sudo chown ubuntu /gisdata
     psql -t -c "SELECT Loader_Generate_Script(ARRAY['FL'], 'sh');" -o import-fl.sh --no-align
     sh import-fl.sh
     # Go for a long walk
@@ -103,12 +124,13 @@ Install some dependencies:
 Grab the latest version of the geocommons geocoder and install it:
 
     cd ~
-    apt-get install git
+    apt-get install git flex ruby-dev
     git clone git://github.com/geocommons/geocoder.git
     cd geocoder
     make
     make install
     gem install Geocoder-US-2.0.4.gem
+    gen install text
 
 We can use the 2015 Tiger data we downloaded previously. 
 
@@ -125,7 +147,7 @@ Create the geocoder database. Note that this must be executed from within the
 
     cd ../build
     ./tiger_import ../database/geocoder.db ../data
-    sh ./build_indexes ../database/geocoder.db
+    sh build_indexes ../database/geocoder.db
     cd ..
     bin/rebuild_metaphones database/geocoder.db
     sudo sh build/rebuild_cluster database/geocoder.db
@@ -139,10 +161,14 @@ To test the geocommons geocoder, fire up an irb session and geocode a test addre
     => #<Geocoder::US::Database:0x00000001cc1248 @db=#<SQLite3::Database:0x00000001cc1158>, @st={}, @dbtype=1, @debug=false, @threadsafe=false>
 
     irb(main):003:0> p db.geocode("400 S Monroe St, Tallahassee, FL 32399")
-    [{:zip=>"32399", :city=>"Tallahassee", :state=>"FL", :lat=>30.436901,
-      :lon=>-84.282546, :fips_county=>"12073", :score=>0.614, :precision=>:zip}]
-    => [{:zip=>"32399", :city=>"Tallahassee", :state=>"FL", :lat=>30.436901,
-         :lon=>-84.282546, :fips_county=>"12073", :score=>0.614, :precision=>:zip}]
+    [{:street=>"S Monroe St",
+      :zip=>"32301",
+      :score=>0.805, 
+      :prenum=>"", 
+      :number=>"400", 
+      :precision=>:range, 
+      :lon=>-84.280632, 
+      :lat=>30.438122}]
 
 ## Installing Nominatim
 
@@ -165,8 +191,8 @@ Download and install Nominatim
     ./configure
     make
 
-Update the nominatim php settings to reflect our version of PostgreSQL,
-PostGIS, and our website URL:
+Update the nominatim php settings (`settings/settings.php`) to reflect our
+version of PostgreSQL, PostGIS, and our local website URL:
 
 
     // Software versions
