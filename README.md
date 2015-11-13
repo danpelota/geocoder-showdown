@@ -1,4 +1,5 @@
-# Geocoder Showdown
+Geocoder Showdown
+=================
 
 Back in 2011, [I asked a question](http://gis.stackexchange.com/questions/7271/geocode-quality-nominatim-vs-postgis-geocoder-vs-geocoderus-2-0) 
 on gis.stackexchange.com regarding the accuracy of range-based geocoders that
@@ -6,15 +7,15 @@ can be installed and run locally. Since then, I've leveraged several solutions
 for bulk geocoding, including the [PostGIS geocoder](http://postgis.net/docs/Geocode.html),
 the ruby-based [Geocommons Geocoder](https://github.com/geocommons/geocoder/), 
 and [SmartyStreets](https://smartystreets.com/) (which doesn't run locally, but
-has no trouble geocoding millions of addresses per hour). However, I've haven't
-come across a thorough analysis of the accuracy of these geocoders in the
-meantime, and the stackexchange question still receives attention, so I figured
+has no trouble geocoding millions of addresses per hour). However, I haven't
+come across a thorough analysis of the accuracy of these geocoders, and the
+stackexchange question still receives attention, so I figured
 I'd evaluate them here. 
 
 First, I'll run through the installation of the PostGIS Tiger geocoder, the
 Nominatim geocoder (i.e. OpenStreetMaps's geocoder/reverse geocoder), and the
-Geocommons Geocoder. While there are web services that expose each through an
-API, I wanted to review the setup and installation here as well.
+Geocommons Geocoder. While there are web services that expose each through 
+APIs, I wanted to review the setup and installation here as well.
 
 Then, I'll evaluate each against a test dataset: the Florida Statewide Property
 Database. I'll also evaluate SmartyStreets, which offers CASS-certified address
@@ -23,7 +24,11 @@ standardization/validation through a web API.
 I'll install and evaluate the geocoders on an `m4.xlarge` AWS EC2 instance with
 16GB of memory and a 50GB SSD, running the Ubuntu 14.04 AMI (ami-5189a661).
 
-## Installing PostgreSQL 9.4, PostGIS 2.2, and the TIGER geocoder
+Installing the Geocoders
+========================
+
+PostgreSQL 9.4, PostGIS 2.2, and the TIGER geocoder
+---------------------------------------------------
 
 First, we'll set the following PostgreSQL environment variables:
 
@@ -114,7 +119,8 @@ Check that the geocoder and all necessary data was installed correctly:
      -84.2807360244119 | 30.4381207774995
     (1 row)
 
-## Installing the geocommons geocoder
+The Geocommons Geocoder
+-----------------------
 
 Install some dependencies:
 
@@ -170,9 +176,10 @@ To test the geocommons geocoder, fire up an irb session and geocode a test addre
       :lon=>-84.280632, 
       :lat=>30.438122}]
 
-## Installing Nominatim
+Installing Nominatim
+--------------------
 
-Install the nominatim dependencies (some of these were installed in previous
+Install the Nominatim dependencies (some of these were installed in previous
 steps, but are included here for completeness):
 
     apt-get install -y build-essential libxml2-dev libgeos-dev libpq-dev libbz2-dev 
@@ -256,7 +263,8 @@ Then we'll load it:
 
     ./utils/setup.php --import-tiger-data
 
-## Installing the benchmark data: Florida statewide parcel data
+Benchmark Data: Florida Statewide Property Data
+===============================================
 
 We'll evaluate the accuracy of these geocoders against GIS data representing
 every parcel in Florida. This data serves as a suitable reference since it:
