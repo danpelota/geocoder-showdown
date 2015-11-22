@@ -46,6 +46,32 @@ Install PostgreSQL 9.4:
     sudo apt-get install -y postgresql-9.4
     export PATH='/usr/lib/postgresql/9.4/bin/':$PATH
 
+You'll want to edit the PostgreSQL config file
+(/etc/postgresql/9.4/main/postgresql.conf on Ubuntu) for optimum performance in
+bulk-loading data. Here's how I tuned my PostgreSQL cluster running on an
+instance with 16GB of RAM:
+
+* `shared_buffers = 4GB`
+* `work_mem = 50MB`
+* `maintenance_work_mem = 4GB`
+* `synchronous_commit = off`
+* `checkpoint_segments = 100`
+* `checkpoint_timeout = 10min`
+* `checkpoint_completion_target = 0.9`
+* `effective_cache_size = 12GB`
+
+I've also set:
+* `fsync = off`
+* `full_page_writes = off`
+
+Be sure to turn these on after the data has been loaded, or you'll risk not
+only data _loss_ in the event of a crash, but data _corruption_.
+
+Also, before connecting to our database, you'll need to edit the `pg_hba.conf` file
+to `trust` local connections.
+
+Restart PostgreSQL and we're ready to install PostGIS.
+
 Install the PostGIS dependencies, as well as a few other spatial packages we'll
 need later:
 
@@ -76,8 +102,7 @@ GIS data:
     sudo make install
     cd ..
 
-Create our PostGIS-enabled database and install the geocoder (first, edit the
-pg_hba.conf file `trust` local socket connections).
+Create our PostGIS-enabled database and install the geocoder.
 
     createdb
     psql -c "CREATE EXTENSION postgis;"
@@ -230,7 +255,7 @@ We'll use nginx as our webserver:
 Setup the local nominatim web service
 
     sudo mkdir -m 755 /usr/share/nginx/html/nominatim
-    sudo chown vagrant /usr/share/nginx/html/nominatim
+    sudo chown ubuntu /usr/share/nginx/html/nominatim
     ./utils/setup.php --create-website /usr/share/nginx/html/nominatim
 
 Edit `/etc/nginx/sites-available/default` to include:
@@ -318,7 +343,7 @@ SRID 4326 and cram all the counties into a single table:
 Next, we need to download and import the NAL data.
 
     cd /gisdata/flprop/nal
-    wget -N ftp://sdrftp03.dor.state.fl.us/Tax%20Roll%20Data%20Files/2015%20Preliminary%20NAL%20-%20SDF%20Files/*NAL*.zip
+    wget -N ftp://sdrftp03.dor.state.fl.us/Tax%20Roll%20Data%20Files/2015%20Final%20NAL-SDF%20Files/*NAL*.zip
     unzip -u -j "*.zip"
 
     # Table to hold the property data
@@ -489,7 +514,7 @@ Next, we need to download and import the NAL data.
     for file in *.csv
     do
         echo "Loading $file"
-        psql -c "\copy staging.props_nal FROM $file CSV HEADER NULL 'thereisnonull'"
+        psql -c "\copy staging.props_nal FROM $file CSV HEADER"
     done
 
     psql << EOF
@@ -512,9 +537,10 @@ Next, we need to download and import the NAL data.
         state_par_id
     FROM
         staging.props_nal;
+    DROP TABLE staging.props_nal;
 
     CREATE INDEX idx_props_nal_parcel_id ON props_nal(parcel_id);
-    VACUUM ANALYZE staging.props_nal;
+    VACUUM ANALYZE props_nal;
 
     -- Some properties are missing a phy_city and/or phy_zipcd. We can infer them
     -- from the owner's information, where the owner has the same address
@@ -525,31 +551,84 @@ Next, we need to download and import the NAL data.
     WHERE
         own_addr1 = phy_addr1
         AND own_addr1 != ''
-        AND (phy_zipcd = '' OR own_zipcd = '')
+        AND (phy_zipcd = '' OR phy_city = '')
         AND own_zipcd != ''
         AND own_city != '';
     EOF
 
 Next, we'll create a sample dataset of 10,000 properties to use as our
-reference:
+reference. To ensure we have reasonable-looking addresses, we'll only include
+those whose street address starts with a digit between 1 and 9. Furthermore,
+some properties have duplicated parcel numbers, so we'll exclude those:
 
     psql << EOF
-    SELECT set_seed(.50);
+    SELECT setseed(.50);
     CREATE TABLE props_sampled AS
     SELECT
         n.parcel_id,
-        btrim(n.phy_addr1 || ' ' || n.phy_addr2) as street,
-        n.phy_city as city,
-        n.phy_zipcd as zip,
-        'FL' as state,
+        btrim(COALESCE(n.phy_addr1, '') || ' ' || COALESCE(n.phy_addr2, '')) as street,
+        COALESCE(n.phy_city, '') as city,
+        COALESCE(n.phy_zipcd, '') as zip,
+        'FL'::text as state,
         g.geom
     FROM
         props_nal n JOIN props_gis g ON n.parcel_id = g.parcelno
     WHERE
-        phy_addr1 != '' AND phy_city != '' AND phy_zipcd != ''
+        phy_addr1 ~ '^[1-9]'
+        AND phy_city ~* '^[A-Z]'
+        AND phy_zipcd LIKE '3%'
+        AND n.parcel_id NOT IN (
+            SELECT parcel_id FROM props_nal GROUP BY 1 HAVING count(*) > 1)
+        AND n.parcel_id NOT IN (
+            SELECT parcelno FROM props_gis GROUP BY 1 HAVING count(*) > 1)
     ORDER BY random()
     LIMIT 10000;
 
     CREATE INDEX idx_props_sampled_geom ON props_sampled USING gist(geom);
     VACUUM ANALYZE props_sampled;
     EOF
+
+There are a few properties statewide that have duplicated parcel numbers. For
+now, we'll just delete them:
+
+    DELETE FROM props_sampled
+    WHERE parcel_id IN
+        (SELECT parcel_id
+         FROM props_sampled
+         GROUP BY 1
+         HAVING count(*) > 1);
+
+
+Geocoding
+=========
+
+Geocoding with PostGIS
+----------------------
+
+    ALTER TABLE props_sampled
+    ADD COLUMN postgis_geom geometry('POINT', 4326),
+    ADD COLUMN postgis_rating integer;
+
+    CREATE INDEX props_sampled_address ON props_sampled(street, city, zip, state);
+    VACUUM ANALYZE props_sampled;
+
+    UPDATE props_sampled
+    SET
+        postgis_geom = t.geomout,
+        postgis_rating = t.rating
+    FROM
+        (SELECT
+             street, city, state, zip,
+             ST_Transform((g.geo).geomout, 4326) as geomout,
+             (g.geo).rating as rating
+         FROM
+            (SELECT
+                street, city, state, zip,
+                geocode(street || ', ' || city || ' ' || state || ' ' || zip, 1) as geo
+             FROM props_sampled
+            ) g
+        ) t
+    WHERE p.street = t.street
+        AND p.city = t.city
+        AND p.state = t.state
+        AND p.zip = t.zip;
